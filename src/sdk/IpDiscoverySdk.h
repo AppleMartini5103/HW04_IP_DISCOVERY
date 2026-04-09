@@ -98,7 +98,9 @@ typedef void (*ipd_progress_cb)(int current, int total, const char* message);
 
 IPD_API void ipd_get_version(ipd_version_t* version);
 
-IPD_API int ipd_discover(ipd_search_flag_t flags, int timeout_ms, ipd_result_t* result);
+// port=0: ARP 스캔만 수행 (1단계)
+// port>0: ARP 스캔 후 발견된 호스트에 TCP 포트 스캔 추가 수행 (2단계)
+IPD_API int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_result_t* result);
 
 IPD_API void ipd_free_result(ipd_result_t* result);
 

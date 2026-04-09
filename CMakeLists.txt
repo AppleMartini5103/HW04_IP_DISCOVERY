@@ -45,6 +45,8 @@ SET(PUGIXML_INCLUDE_DIR ${PUGIXML_DIR})
 # SOURCE
 SET(SOURCES
         src/sdk/IpDiscoverySdk.cpp
+        src/network/ArpScanner.cpp
+        src/network/PortScanner.cpp
 )
 
 # SHARED LIBRARY
