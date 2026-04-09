@@ -20,8 +20,8 @@ int main() {
     // ========== 프로그레스 콜백 등록 ==========
     ipd_set_progress_callback(progress_callback);
 
-    // ========== 1단계만 테스트: ARP 스캔 (port=0) ==========
-    printf("\n[TEST 1] ARP scan only (port=0)\n");
+    // ========== 1단계만 테스트: 네트워크 스캔 (port=0) ==========
+    printf("\n[TEST 1] Network scan only (port=0)\n");
     print_separator();
 
     auto t1_start = std::chrono::steady_clock::now();
@@ -57,8 +57,8 @@ int main() {
 
     printf("\n[TEST 1] Elapsed: %lld ms\n", t1_ms);
 
-    // ========== 2단계 테스트: ARP + 포트 스캔 (port=554) ==========
-    printf("\n\n[TEST 2] ARP + Port scan (port=554)\n");
+    // ========== 2단계 테스트: 네트워크 스캔 + 포트 스캔 (port=554) ==========
+    printf("\n\n[TEST 2] Network scan + Port scan (port=554)\n");
     print_separator();
 
     auto t2_start = std::chrono::steady_clock::now();
@@ -92,8 +92,8 @@ int main() {
 
     // ========== 요약 ==========
     print_separator();
-    printf("TEST 1 (ARP only)       : %lld ms\n", t1_ms);
-    printf("TEST 2 (ARP + port 554) : %lld ms\n", t2_ms);
+    printf("TEST 1 (Network scan only)       : %lld ms\n", t1_ms);
+    printf("TEST 2 (Network scan + port 554) : %lld ms\n", t2_ms);
     print_separator();
 
     printf("\nDone.\n");

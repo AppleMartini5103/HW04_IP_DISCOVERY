@@ -8,7 +8,7 @@
 
 | 기술 | 용도 | 비고 |
 |------|------|------|
-| ARP 스캔 | 서브넷 전체 디바이스 IP+MAC 검색 | OS API (추가 라이브러리 없음) |
+| 네트워크 스캔 | ICMP ping + ARP로 서브넷 디바이스 IP+MAC 검색 | OS API (추가 라이브러리 없음) |
 | 포트 스캔 | 열린 포트로 디바이스 타입 추정 | OS API (TCP connect) |
 | UPnP | 공유기 상세 정보 (공인 IP, 상태) | miniupnpc 2.3.3 |
 | ONVIF | IP 카메라 검색 및 상세 정보 | WS-Discovery + SOAP |
@@ -20,7 +20,7 @@
 [검색 버튼 클릭]
      │
      ▼
-① ARP 스캔 (서브넷 전체) → IP + MAC 목록
+① 네트워크 스캔 (ICMP ping + ARP) → IP + MAC 목록
      │
      ▼
 ② 포트 스캔 (주요 포트) → 열린 포트 목록
@@ -93,8 +93,8 @@ HW04_IP_DISCOVERY/
 ipd_discover(flags, timeout_ms, port, &result)
   │
   ▼
-1단계: ARP 스캔 (항상 수행)
-  → 서브넷 내 살아있는 호스트 IP + MAC 수집
+1단계: 네트워크 스캔 (항상 수행)
+  → ICMP ping으로 살아있는 호스트 탐지 + ARP로 MAC 수집
   │
   ▼
 2단계: TCP 포트 스캔 (port > 0 일 때만 수행)
@@ -102,9 +102,9 @@ ipd_discover(flags, timeout_ms, port, &result)
   → port == 0 이면 2단계 스킵
 ```
 
-#### 1단계: ARP 스캔
-- [x] Windows: SendARP() 기반 서브넷 스캔 구현
-- [ ] Linux: raw socket 기반 ARP 스캔 구현 (나중에)
+#### 1단계: 네트워크 스캔
+- [x] Windows: ICMP ping (IcmpSendEcho) + SendARP 기반 서브넷 스캔 구현
+- [ ] Linux: raw socket 기반 구현 (나중에)
 - [x] 로컬 IP/서브넷 자동 감지
 - [x] IP + MAC 주소 수집
 - [x] 스캔 대상 IP 범위 계산 (예: 192.168.0.1 ~ 192.168.0.254)
@@ -193,7 +193,7 @@ SDK → [Probe 메시지] → 239.255.255.250:3702 (멀티캐스트)
 ```
 ipd_discover(flags, timeout_ms, port, &result)
   ├─ 1) 로컬 IP/서브넷 감지
-  ├─ 2) ARP 스캔 → devices[] 초기 구성
+  ├─ 2) 네트워크 스캔 (ICMP + ARP) → devices[] 초기 구성
   ├─ 3) 포트 스캔 → ports[] 채움 (port > 0일 때만)
   ├─ 4) 프로토콜 상세 조회 (flags에 따라)
   │     ├─ IPD_SEARCH_UPNP → UPnP 조회
@@ -209,8 +209,8 @@ ipd_discover(flags, timeout_ms, port, &result)
 
 | 단계 | message 예시 |
 |------|-------------|
-| ARP 스캔 | "ARP scanning 192.168.0.x/24 ..." |
-| ARP 완료 | "Found 12 hosts" |
+| 네트워크 스캔 | "Network scanning 192.168.0.x/24 ..." |
+| 스캔 완료 | "Found 12 hosts" |
 | 포트 스캔 | "Port scanning 12 hosts on port 80..." |
 | UPnP 조회 | "Querying UPnP IGD..." |
 | ONVIF 검색 | "Discovering ONVIF cameras..." |
@@ -221,7 +221,7 @@ ipd_discover(flags, timeout_ms, port, &result)
 - [x] current/total 값으로 진행률 계산 가능 (동적 total_steps 계산)
 
 ### #14 멀티스레드 스캔 최적화
-- [x] ARP 스캔 병렬 처리 (최대 64스레드, IP 범위 분배)
+- [x] 네트워크 스캔 병렬 처리 (CPU 코어 기반, ICMP ping + ARP)
 - [x] 포트 스캔 병렬 처리 (호스트당 1스레드 동시 스캔)
 - [x] std::thread 기반 구현
 
@@ -288,7 +288,7 @@ int main() {
 | | #2 공개 헤더 설계 | ✅ 완료 |
 | | #3 빌드 스크립트 | ✅ 완료 |
 | | #4 버전 API 구현 | ✅ 완료 |
-| 2. 네트워크 탐색 | #5 Network Scan (ARP + 포트스캔 2단계) | ✅ 완료 |
+| 2. 네트워크 탐색 | #5 Network Scan (ICMP + ARP + 포트스캔 2단계) | ✅ 완료 |
 | 3. 프로토콜 상세 | #9 UPnP 조회 | ✅ 완료 |
 | (순서: #9→#10/#11→#8) | #10 ONVIF 검색 | ✅ 완료 |
 | | #11 ONVIF 상세 | ✅ 완료 |

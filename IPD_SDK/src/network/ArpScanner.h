@@ -21,5 +21,5 @@ struct LocalNetInfo {
 // 로컬 네트워크 정보 자동 감지
 bool arp_get_local_net_info(LocalNetInfo& info);
 
-// 서브넷 ARP 스캔 (살아있는 호스트 반환)
+// 서브넷 네트워크 스캔 (ICMP ping으로 탐지 후 ARP로 MAC 획득)
 bool arp_scan_subnet(const LocalNetInfo& info, std::vector<ArpEntry>& results);

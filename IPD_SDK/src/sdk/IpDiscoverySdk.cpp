@@ -20,12 +20,17 @@
 static ipd_progress_cb g_progress_cb = nullptr;
 
 #ifdef _WIN32
+static int g_wsa_refcount = 0;
 static bool wsa_init() {
+    if (g_wsa_refcount++ > 0) return true;
     WSADATA wsa;
     return (WSAStartup(MAKEWORD(2, 2), &wsa) == 0);
 }
 static void wsa_cleanup() {
-    WSACleanup();
+    if (--g_wsa_refcount <= 0) {
+        WSACleanup();
+        g_wsa_refcount = 0;
+    }
 }
 #else
 static bool wsa_init() { return true; }
@@ -63,17 +68,17 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
     strncpy(result->subnet, subnet_str, sizeof(result->subnet) - 1);
 
     // 총 단계 수 계산
-    int total_steps = 1;  // ARP
+    int total_steps = 1;  // Network scan (ICMP + ARP)
     if (port > 0) total_steps++;
     if (flags & IPD_SEARCH_UPNP) total_steps++;
     if (flags & IPD_SEARCH_CAMERA) total_steps++;
     total_steps++;  // 타입 판별
     int current_step = 0;
 
-    // ========== 1단계: ARP 스캔 ==========
+    // ========== 1단계: 네트워크 스캔 (ICMP ping + ARP) ==========
     if (g_progress_cb) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "ARP scanning %s/%d ...", netInfo.ip.c_str(), netInfo.prefix_len);
+        snprintf(msg, sizeof(msg), "Network scanning %s/%d ...", netInfo.ip.c_str(), netInfo.prefix_len);
         g_progress_cb(current_step, total_steps, msg);
     }
 
@@ -166,19 +171,28 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
         if (g_progress_cb) {
             g_progress_cb(current_step, total_steps, "Discovering ONVIF cameras...");
         }
-        onvif_discover(timeout_ms > 0 ? timeout_ms : 3000, onvifDevices);
+        int onvif_timeout = (timeout_ms > 0) ? timeout_ms : 3000;
+        onvif_discover(onvif_timeout, onvifDevices);
 
-        for (size_t i = 0; i < onvifDevices.size(); i++) {
-            if (!onvifDevices[i].service_url.empty()) {
-                if (g_progress_cb) {
-                    char msg[128];
-                    snprintf(msg, sizeof(msg), "Querying ONVIF camera %s (%d/%d)",
-                             onvifDevices[i].ip.c_str(),
-                             static_cast<int>(i + 1),
-                             static_cast<int>(onvifDevices.size()));
-                    g_progress_cb(current_step, total_steps, msg);
+        if (!onvifDevices.empty()) {
+            if (g_progress_cb) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "Querying %d ONVIF cameras...",
+                         static_cast<int>(onvifDevices.size()));
+                g_progress_cb(current_step, total_steps, msg);
+            }
+
+            // ONVIF 상세 조회 병렬 처리
+            std::vector<std::thread> cam_threads;
+            for (size_t i = 0; i < onvifDevices.size(); i++) {
+                if (!onvifDevices[i].service_url.empty()) {
+                    cam_threads.emplace_back([&onvifDevices, i]() {
+                        onvif_get_device_info(onvifDevices[i].service_url, onvifDevices[i]);
+                    });
                 }
-                onvif_get_device_info(onvifDevices[i].service_url, onvifDevices[i]);
+            }
+            for (auto& th : cam_threads) {
+                th.join();
             }
         }
         current_step++;
