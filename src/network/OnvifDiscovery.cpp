@@ -16,7 +16,6 @@
 #include <string>
 #include <sstream>
 
-// WS-Discovery Probe 메시지
 static const char* WS_DISCOVERY_PROBE =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
     "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
@@ -39,20 +38,17 @@ static const char* WS_DISCOVERY_PROBE =
 #define WS_DISCOVERY_PORT 3702
 #define RECV_BUF_SIZE     65536
 
-// 응답 XML에서 XAddrs (서비스 URL) 추출
 static std::string extract_xaddrs(const std::string& xml) {
     pugi::xml_document doc;
     if (!doc.load_string(xml.c_str())) return "";
 
-    // XAddrs는 여러 네임스페이스 경로에 있을 수 있음
-    // 재귀적으로 "XAddrs" 이름의 노드를 찾음
     struct XAddrsFinder : pugi::xml_tree_walker {
         std::string result;
         bool for_each(pugi::xml_node& node) override {
             std::string name = node.name();
             if (name.find("XAddrs") != std::string::npos) {
                 result = node.text().get();
-                return false;  // 찾으면 중단
+                return false;
             }
             return true;
         }
@@ -61,7 +57,6 @@ static std::string extract_xaddrs(const std::string& xml) {
     XAddrsFinder finder;
     doc.traverse(finder);
 
-    // XAddrs에 공백으로 구분된 여러 URL이 있을 수 있음 → 첫 번째만
     std::string addrs = finder.result;
     auto space = addrs.find(' ');
     if (space != std::string::npos) {
@@ -71,9 +66,7 @@ static std::string extract_xaddrs(const std::string& xml) {
     return addrs;
 }
 
-// XAddrs URL에서 IP 추출
 static std::string extract_ip_from_url(const std::string& url) {
-    // "http://192.168.0.64:80/onvif/device_service" → "192.168.0.64"
     auto start = url.find("://");
     if (start == std::string::npos) return "";
     start += 3;
@@ -84,7 +77,6 @@ static std::string extract_ip_from_url(const std::string& url) {
 
 bool onvif_discover(int timeout_ms, std::vector<OnvifDevice>& devices) {
     devices.clear();
-
     if (timeout_ms <= 0) timeout_ms = 3000;
 
 #ifdef _WIN32
@@ -95,11 +87,9 @@ bool onvif_discover(int timeout_ms, std::vector<OnvifDevice>& devices) {
     if (sock < 0) return false;
 #endif
 
-    // SO_REUSEADDR
     int reuse = 1;
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
 
-    // 수신 타임아웃 설정
 #ifdef _WIN32
     DWORD tv = static_cast<DWORD>(timeout_ms);
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
@@ -110,13 +100,11 @@ bool onvif_discover(int timeout_ms, std::vector<OnvifDevice>& devices) {
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
 
-    // 멀티캐스트 대상 주소
     struct sockaddr_in dest = {};
     dest.sin_family = AF_INET;
     dest.sin_port = htons(WS_DISCOVERY_PORT);
     inet_pton(AF_INET, WS_DISCOVERY_ADDR, &dest.sin_addr);
 
-    // Probe 전송
     int sent = sendto(sock, WS_DISCOVERY_PROBE, static_cast<int>(strlen(WS_DISCOVERY_PROBE)),
                       0, reinterpret_cast<struct sockaddr*>(&dest), sizeof(dest));
     if (sent <= 0) {
@@ -128,7 +116,6 @@ bool onvif_discover(int timeout_ms, std::vector<OnvifDevice>& devices) {
         return false;
     }
 
-    // 응답 수신 (타임아웃까지 반복)
     char buf[RECV_BUF_SIZE];
     struct sockaddr_in from = {};
     while (true) {
@@ -139,10 +126,9 @@ bool onvif_discover(int timeout_ms, std::vector<OnvifDevice>& devices) {
 #endif
         int recvLen = recvfrom(sock, buf, RECV_BUF_SIZE - 1, 0,
                                reinterpret_cast<struct sockaddr*>(&from), &fromLen);
-        if (recvLen <= 0) break;  // 타임아웃 또는 에러
+        if (recvLen <= 0) break;
 
         buf[recvLen] = '\0';
-
         std::string xml(buf, recvLen);
         std::string xaddrs = extract_xaddrs(xml);
 
@@ -151,7 +137,6 @@ bool onvif_discover(int timeout_ms, std::vector<OnvifDevice>& devices) {
             dev.service_url = xaddrs;
             dev.ip = extract_ip_from_url(xaddrs);
 
-            // 중복 IP 제거
             bool dup = false;
             for (const auto& d : devices) {
                 if (d.ip == dev.ip) { dup = true; break; }
@@ -167,15 +152,14 @@ bool onvif_discover(int timeout_ms, std::vector<OnvifDevice>& devices) {
 #else
     close(sock);
 #endif
-
     return true;
 }
 
 // ============================================================
-// #11 ONVIF 상세 정보 조회 (GetDeviceInformation)
+// ONVIF GetDeviceInformation
 // ============================================================
 
-static const char* SOAP_GET_DEVICE_INFO_TEMPLATE =
+static const char* SOAP_GET_DEVICE_INFO =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
     "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
     " xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">"
@@ -184,9 +168,7 @@ static const char* SOAP_GET_DEVICE_INFO_TEMPLATE =
     "</soap:Body>"
     "</soap:Envelope>";
 
-// 간단한 HTTP POST (ONVIF용)
 static std::string http_post(const std::string& url, const std::string& body, int timeout_ms) {
-    // URL 파싱: http://ip:port/path
     std::string host, path;
     uint16_t port = 80;
 
@@ -209,26 +191,20 @@ static std::string http_post(const std::string& url, const std::string& body, in
         host = host.substr(0, colonPos);
     }
 
-    // TCP 소켓 연결
 #ifdef _WIN32
     SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) return "";
+    DWORD tvs = static_cast<DWORD>(timeout_ms);
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tvs), sizeof(tvs));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tvs), sizeof(tvs));
 #else
     int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) return "";
-#endif
-
-    // 타임아웃 설정
-#ifdef _WIN32
-    DWORD tv = static_cast<DWORD>(timeout_ms);
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
-#else
-    struct timeval tv;
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    struct timeval tvs;
+    tvs.tv_sec = timeout_ms / 1000;
+    tvs.tv_usec = (timeout_ms % 1000) * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tvs, sizeof(tvs));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tvs, sizeof(tvs));
 #endif
 
     struct sockaddr_in addr = {};
@@ -245,7 +221,6 @@ static std::string http_post(const std::string& url, const std::string& body, in
         return "";
     }
 
-    // HTTP 요청 생성
     std::ostringstream req;
     req << "POST " << path << " HTTP/1.1\r\n"
         << "Host: " << host << ":" << port << "\r\n"
@@ -258,14 +233,13 @@ static std::string http_post(const std::string& url, const std::string& body, in
     std::string request = req.str();
     send(sock, request.c_str(), static_cast<int>(request.size()), 0);
 
-    // 응답 수신
     std::string response;
-    char buf[4096];
+    char rbuf[4096];
     while (true) {
-        int n = recv(sock, buf, sizeof(buf) - 1, 0);
+        int n = recv(sock, rbuf, sizeof(rbuf) - 1, 0);
         if (n <= 0) break;
-        buf[n] = '\0';
-        response += buf;
+        rbuf[n] = '\0';
+        response += rbuf;
     }
 
 #ifdef _WIN32
@@ -274,23 +248,20 @@ static std::string http_post(const std::string& url, const std::string& body, in
     close(sock);
 #endif
 
-    // HTTP body 추출 (헤더 이후)
     auto headerEnd = response.find("\r\n\r\n");
     if (headerEnd != std::string::npos) {
         return response.substr(headerEnd + 4);
     }
-
     return response;
 }
 
 bool onvif_get_device_info(const std::string& service_url, OnvifDevice& device) {
-    std::string response = http_post(service_url, SOAP_GET_DEVICE_INFO_TEMPLATE, 3000);
+    std::string response = http_post(service_url, SOAP_GET_DEVICE_INFO, 3000);
     if (response.empty()) return false;
 
     pugi::xml_document doc;
     if (!doc.load_string(response.c_str())) return false;
 
-    // 재귀적으로 필드를 찾는 walker
     struct InfoFinder : pugi::xml_tree_walker {
         std::string manufacturer;
         std::string model;
@@ -312,13 +283,10 @@ bool onvif_get_device_info(const std::string& service_url, OnvifDevice& device) 
     InfoFinder finder;
     doc.traverse(finder);
 
-    if (finder.manufacturer.empty() && finder.model.empty()) {
-        return false;
-    }
+    if (finder.manufacturer.empty() && finder.model.empty()) return false;
 
     device.manufacturer = finder.manufacturer;
     device.model = finder.model;
     device.firmware_version = finder.firmware;
-
     return true;
 }

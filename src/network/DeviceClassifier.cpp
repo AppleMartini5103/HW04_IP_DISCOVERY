@@ -3,7 +3,6 @@
 #include <cstring>
 #include <cstdio>
 
-// 알려진 레이더 포트
 static const uint16_t RADAR_PORTS[] = { 5000, 8899 };
 static const int RADAR_PORT_COUNT = sizeof(RADAR_PORTS) / sizeof(RADAR_PORTS[0]);
 
@@ -21,13 +20,12 @@ void classify_device(
 ) {
     std::string deviceIp = device.ip;
 
-    // 1순위: UPnP IGD 응답이 있으면 → IGD
+    // 1순위: UPnP IGD
     if (igdInfo.found && igdInfo.gateway_ip == deviceIp) {
         device.type = IPD_DEVICE_IGD;
         strncpy(device.type_name, "IGD", sizeof(device.type_name) - 1);
         strncpy(device.name, "Gateway", sizeof(device.name) - 1);
 
-        // WAN IP, 상태를 detail에 기록
         char detail[256] = {};
         snprintf(detail, sizeof(detail), "WAN:%s Status:%s",
                  igdInfo.wan_ip.c_str(), igdInfo.status.c_str());
@@ -35,7 +33,7 @@ void classify_device(
         return;
     }
 
-    // 2순위: ONVIF 응답이 있으면 → Camera
+    // 2순위: ONVIF Camera
     for (const auto& cam : onvifDevices) {
         if (cam.ip == deviceIp) {
             device.type = IPD_DEVICE_CAMERA;
@@ -60,7 +58,7 @@ void classify_device(
         }
     }
 
-    // 3순위: 알려진 레이더 포트가 열려있으면 → Radar
+    // 3순위: Radar
     for (int i = 0; i < device.port_count; i++) {
         if (is_radar_port(device.ports[i])) {
             device.type = IPD_DEVICE_RADAR;
@@ -70,7 +68,7 @@ void classify_device(
         }
     }
 
-    // 4순위: 포트가 열려있으면 → Host
+    // 4순위: Host
     if (device.port_count > 0) {
         device.type = IPD_DEVICE_HOST;
         strncpy(device.type_name, "Host", sizeof(device.type_name) - 1);
