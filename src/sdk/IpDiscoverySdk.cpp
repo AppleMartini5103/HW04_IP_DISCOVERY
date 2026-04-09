@@ -2,6 +2,9 @@
 #include "info/version.h"
 #include "network/ArpScanner.h"
 #include "network/PortScanner.h"
+#include "network/UpnpQuery.h"
+#include "network/OnvifDiscovery.h"
+#include "network/DeviceClassifier.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -68,7 +71,7 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
 
     // ========== 1단계: ARP 스캔 ==========
     if (g_progress_cb) {
-        g_progress_cb(0, 1, "ARP scanning...");
+        g_progress_cb(0, 4, "ARP scanning...");
     }
 
     std::vector<ArpEntry> arpResults;
@@ -79,13 +82,7 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
 
     if (arpResults.empty()) {
         wsa_cleanup();
-        return IPD_SUCCESS;  // 발견된 호스트 없음
-    }
-
-    if (g_progress_cb) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Found %d hosts", static_cast<int>(arpResults.size()));
-        g_progress_cb(1, 1, msg);
+        return IPD_SUCCESS;
     }
 
     // ========== 결과 구조체 할당 ==========
@@ -106,27 +103,53 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
 
     // ========== 2단계: TCP 포트 스캔 (port > 0일 때만) ==========
     if (port > 0) {
+        if (g_progress_cb) {
+            g_progress_cb(1, 4, "Port scanning...");
+        }
+
         int port_timeout = (timeout_ms > 0) ? timeout_ms : 500;
-
         for (int i = 0; i < count; i++) {
-            if (g_progress_cb) {
-                char msg[128];
-                snprintf(msg, sizeof(msg), "Port scanning %s:%d (%d/%d)",
-                         result->devices[i].ip, port, i + 1, count);
-                g_progress_cb(i, count, msg);
-            }
-
             if (port_check_tcp(result->devices[i].ip, port, port_timeout)) {
                 result->devices[i].ports[0] = port;
                 result->devices[i].port_count = 1;
-                result->devices[i].type = IPD_DEVICE_HOST;
-                strncpy(result->devices[i].type_name, "Host", sizeof(result->devices[i].type_name) - 1);
             }
         }
+    }
 
+    // ========== 3단계: 프로토콜별 상세 조회 ==========
+    UpnpIgdInfo igdInfo = {};
+    std::vector<OnvifDevice> onvifDevices;
+
+    // UPnP 조회
+    if (flags & IPD_SEARCH_UPNP) {
         if (g_progress_cb) {
-            g_progress_cb(count, count, "Port scan complete");
+            g_progress_cb(2, 4, "Querying UPnP IGD...");
         }
+        upnp_query_igd(timeout_ms > 0 ? timeout_ms : 2000, igdInfo);
+    }
+
+    // ONVIF 조회
+    if (flags & IPD_SEARCH_CAMERA) {
+        if (g_progress_cb) {
+            g_progress_cb(3, 4, "Discovering ONVIF cameras...");
+        }
+        onvif_discover(timeout_ms > 0 ? timeout_ms : 3000, onvifDevices);
+
+        // 발견된 카메라의 상세 정보 조회
+        for (auto& cam : onvifDevices) {
+            if (!cam.service_url.empty()) {
+                onvif_get_device_info(cam.service_url, cam);
+            }
+        }
+    }
+
+    // ========== 4단계: 디바이스 타입 판별 ==========
+    if (g_progress_cb) {
+        g_progress_cb(4, 4, "Classifying devices...");
+    }
+
+    for (int i = 0; i < count; i++) {
+        classify_device(result->devices[i], igdInfo, onvifDevices);
     }
 
     wsa_cleanup();

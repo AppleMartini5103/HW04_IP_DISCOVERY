@@ -47,6 +47,9 @@ SET(SOURCES
         src/sdk/IpDiscoverySdk.cpp
         src/network/ArpScanner.cpp
         src/network/PortScanner.cpp
+        src/network/UpnpQuery.cpp
+        src/network/OnvifDiscovery.cpp
+        src/network/DeviceClassifier.cpp
 )
 
 # SHARED LIBRARY
@@ -71,6 +74,7 @@ MESSAGE(STATUS "SDK output directory: ${SDK_DIR}")
 TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE
         src
         src/sdk
+        src/network
         ${MINIUPNP_INCLUDE_DIR}
         ${PUGIXML_INCLUDE_DIR}
 )
