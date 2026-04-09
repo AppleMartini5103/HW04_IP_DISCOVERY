@@ -12,9 +12,13 @@
 #include <string>
 #include <thread>
 #include <mutex>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
 #endif
 
 static ipd_progress_cb g_progress_cb = nullptr;
@@ -70,8 +74,7 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
     // 총 단계 수 계산
     int total_steps = 1;  // Network scan (ICMP + ARP)
     if (port > 0) total_steps++;
-    if (flags & IPD_SEARCH_UPNP) total_steps++;
-    if (flags & IPD_SEARCH_CAMERA) total_steps++;
+    if ((flags & IPD_SEARCH_UPNP) || (flags & IPD_SEARCH_CAMERA)) total_steps++;  // 프로토콜 조회 (병렬)
     total_steps++;  // 타입 판별
     int current_step = 0;
 
@@ -127,7 +130,8 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
             g_progress_cb(current_step, total_steps, msg);
         }
 
-        int port_timeout = (timeout_ms > 0) ? timeout_ms : 500;
+        // 같은 서브넷 TCP connect는 200ms면 충분
+        int port_timeout = 200;
 
         // 스레드 수 = CPU 코어 수 기반 (최소 2, 최대 32)
         int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
@@ -155,48 +159,57 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
         current_step++;
     }
 
-    // ========== 3단계: 프로토콜별 상세 조회 ==========
+    // ========== 3단계: 프로토콜별 상세 조회 (UPnP + ONVIF 병렬) ==========
     UpnpIgdInfo igdInfo = {};
     std::vector<OnvifDevice> onvifDevices;
 
-    if (flags & IPD_SEARCH_UPNP) {
-        if (g_progress_cb) {
-            g_progress_cb(current_step, total_steps, "Querying UPnP IGD...");
-        }
-        upnp_query_igd(timeout_ms > 0 ? timeout_ms : 2000, igdInfo);
-        current_step++;
+    if (g_progress_cb) {
+        g_progress_cb(current_step, total_steps, "Querying protocols (UPnP + ONVIF)...");
     }
 
-    if (flags & IPD_SEARCH_CAMERA) {
-        if (g_progress_cb) {
-            g_progress_cb(current_step, total_steps, "Discovering ONVIF cameras...");
+    {
+        // 프로토콜 조회 최대 대기 시간 = timeout_ms (최소 3초, 최대 5초)
+        int proto_max_wait = (timeout_ms > 3000) ? timeout_ms : 3000;
+        if (proto_max_wait > 5000) proto_max_wait = 5000;
+
+        std::vector<std::thread> proto_threads;
+
+        // UPnP 스레드
+        if (flags & IPD_SEARCH_UPNP) {
+            proto_threads.emplace_back([&]() {
+                upnp_query_igd(proto_max_wait, igdInfo);
+            });
         }
-        int onvif_timeout = (timeout_ms > 0) ? timeout_ms : 3000;
-        onvif_discover(onvif_timeout, onvifDevices);
 
-        if (!onvifDevices.empty()) {
-            if (g_progress_cb) {
-                char msg[128];
-                snprintf(msg, sizeof(msg), "Querying %d ONVIF cameras...",
-                         static_cast<int>(onvifDevices.size()));
-                g_progress_cb(current_step, total_steps, msg);
-            }
+        // ONVIF 스레드 (검색 + 상세 조회)
+        if (flags & IPD_SEARCH_CAMERA) {
+            proto_threads.emplace_back([&]() {
+                onvif_discover(proto_max_wait, onvifDevices);
 
-            // ONVIF 상세 조회 병렬 처리
-            std::vector<std::thread> cam_threads;
-            for (size_t i = 0; i < onvifDevices.size(); i++) {
-                if (!onvifDevices[i].service_url.empty()) {
-                    cam_threads.emplace_back([&onvifDevices, i]() {
-                        onvif_get_device_info(onvifDevices[i].service_url, onvifDevices[i]);
-                    });
+                if (!onvifDevices.empty()) {
+                    std::vector<std::thread> cam_threads;
+                    for (size_t i = 0; i < onvifDevices.size(); i++) {
+                        if (!onvifDevices[i].service_url.empty()) {
+                            cam_threads.emplace_back([&onvifDevices, i]() {
+                                onvif_get_device_info(onvifDevices[i].service_url, onvifDevices[i]);
+                            });
+                        }
+                    }
+                    for (auto& th : cam_threads) {
+                        th.join();
+                    }
                 }
-            }
-            for (auto& th : cam_threads) {
-                th.join();
-            }
+            });
         }
-        current_step++;
+
+        // UPnP + ONVIF 동시 대기 (join — 데이터 안전을 위해)
+        // proto_max_wait가 upnpDiscover/onvif_discover의 timeout으로 전달되므로
+        // 정상적이면 proto_max_wait 이내에 종료됨
+        for (auto& th : proto_threads) {
+            th.join();
+        }
     }
+    current_step++;
 
     // ========== 4단계: 디바이스 타입 판별 ==========
     if (g_progress_cb) {
@@ -206,6 +219,18 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
     for (int i = 0; i < count; i++) {
         classify_device(result->devices[i], igdInfo, onvifDevices);
     }
+
+    // ========== 5단계: IP 오름차순 정렬 ==========
+    std::sort(result->devices, result->devices + count,
+        [](const ipd_device_t& a, const ipd_device_t& b) {
+            // IP 문자열을 숫자로 비교 (192.168.1.2 < 192.168.1.10)
+            uint32_t ip_a = 0, ip_b = 0;
+            struct in_addr addr;
+            if (inet_pton(AF_INET, a.ip, &addr) == 1) ip_a = ntohl(addr.s_addr);
+            if (inet_pton(AF_INET, b.ip, &addr) == 1) ip_b = ntohl(addr.s_addr);
+            return ip_a < ip_b;
+        });
+
     current_step++;
 
     if (g_progress_cb) {

@@ -2,8 +2,12 @@
 #include <chrono>
 #include "IpDiscoverySdk.h"
 
+static auto g_start = std::chrono::steady_clock::now();
+
 void progress_callback(int current, int total, const char* message) {
-    printf("[%d/%d] %s\n", current, total, message);
+    auto now = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - g_start).count();
+    printf("[%d/%d] +%5lldms | %s\n", current, total, ms, message);
 }
 
 void print_separator() {
@@ -24,7 +28,8 @@ int main() {
     printf("\n[TEST 1] Network scan only (port=0)\n");
     print_separator();
 
-    auto t1_start = std::chrono::steady_clock::now();
+    g_start = std::chrono::steady_clock::now();
+    auto t1_start = g_start;
 
     ipd_result_t result = {};
     int ret = ipd_discover(IPD_SEARCH_ALL, 3000, 0, &result);
@@ -61,10 +66,11 @@ int main() {
     printf("\n\n[TEST 2] Network scan + Port scan (port=554)\n");
     print_separator();
 
-    auto t2_start = std::chrono::steady_clock::now();
+    g_start = std::chrono::steady_clock::now();
+    auto t2_start = g_start;
 
     ipd_result_t result2 = {};
-    ret = ipd_discover(IPD_SEARCH_ALL, 500, 554, &result2);
+    ret = ipd_discover(IPD_SEARCH_ALL, 3000, 554, &result2);
 
     auto t2_end = std::chrono::steady_clock::now();
     auto t2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t2_end - t2_start).count();

@@ -4,7 +4,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
-#include <icmpapi.h>
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
 #else
@@ -18,7 +17,7 @@
 #include <cstdio>
 #include <thread>
 #include <mutex>
-#include <atomic>
+#include <chrono>
 
 static std::string mac_to_string(const uint8_t* mac, int len) {
     if (len < 6) return "";
@@ -80,35 +79,65 @@ bool arp_get_local_net_info(LocalNetInfo& info) {
     return false;
 }
 
-// ICMP ping으로 호스트 존재 여부 빠르게 확인 (타임아웃 짧게)
-static bool ping_check(uint32_t ip_h, int timeout_ms) {
-    HANDLE hIcmp = IcmpCreateFile();
-    if (hIcmp == INVALID_HANDLE_VALUE) return false;
+// OS ARP 캐시에서 서브넷 내 호스트 읽기
+static void read_arp_cache(const LocalNetInfo& info, uint32_t my_ip, std::vector<ArpEntry>& results) {
+    ULONG tableSize = 0;
+    GetIpNetTable(nullptr, &tableSize, FALSE);
+    if (tableSize == 0) return;
 
-    IPAddr destIp = htonl(ip_h);
-    char sendData[] = "ping";
-    DWORD replySize = sizeof(ICMP_ECHO_REPLY) + sizeof(sendData) + 8;
-    std::vector<uint8_t> replyBuf(replySize);
+    std::vector<uint8_t> tableBuf(tableSize);
+    auto* table = reinterpret_cast<MIB_IPNETTABLE*>(tableBuf.data());
 
-    DWORD ret = IcmpSendEcho(hIcmp, destIp, sendData, sizeof(sendData),
-                              nullptr, replyBuf.data(), replySize, static_cast<DWORD>(timeout_ms));
+    if (GetIpNetTable(table, &tableSize, FALSE) != NO_ERROR) return;
 
-    IcmpCloseHandle(hIcmp);
-    return (ret > 0);
+    for (DWORD i = 0; i < table->dwNumEntries; i++) {
+        auto& row = table->table[i];
+
+        if (row.dwType != MIB_IPNET_TYPE_DYNAMIC &&
+            row.dwType != MIB_IPNET_TYPE_STATIC) continue;
+
+        uint32_t ip_h = ntohl(row.dwAddr);
+
+        if (ip_h <= info.network_addr || ip_h >= info.broadcast_addr) continue;
+        if (ip_h == my_ip) continue;
+        if (row.dwPhysAddrLen < 6) continue;
+
+        ArpEntry entry;
+        entry.ip = ip_to_string(ip_h);
+        entry.mac = mac_to_string(row.bPhysAddr, static_cast<int>(row.dwPhysAddrLen));
+        results.push_back(entry);
+    }
 }
 
-// SendARP로 MAC 주소 획득
-static bool get_mac_by_arp(uint32_t ip_h, std::string& mac) {
-    IPAddr destIp = htonl(ip_h);
-    ULONG macAddr[2] = {0};
-    ULONG macLen = 6;
+// TCP connect로 호스트 생존 여부 확인 + ARP 캐시 갱신 유도
+// RTS_Crosshair 방식 참고: 200ms 타임아웃, non-blocking connect
+static void tcp_probe(uint32_t ip_h) {
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) return;
 
-    DWORD ret = SendARP(destIp, 0, macAddr, &macLen);
-    if (ret == NO_ERROR && macLen > 0) {
-        mac = mac_to_string(reinterpret_cast<uint8_t*>(macAddr), static_cast<int>(macLen));
-        return true;
-    }
-    return false;
+    // non-blocking
+    u_long mode = 1;
+    ioctlsocket(sock, FIONBIO, &mode);
+
+    struct sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(80);  // 아무 포트나 OK — 목적은 ARP 유도
+    addr.sin_addr.s_addr = htonl(ip_h);
+
+    connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+
+    // 200ms 대기 (TCP SYN → ARP 요청이 자동 발생)
+    fd_set writefds;
+    FD_ZERO(&writefds);
+    FD_SET(sock, &writefds);
+
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 200 * 1000;  // 200ms
+
+    select(static_cast<int>(sock) + 1, nullptr, &writefds, nullptr, &tv);
+
+    closesocket(sock);
 }
 
 bool arp_scan_subnet(const LocalNetInfo& info, std::vector<ArpEntry>& results) {
@@ -122,67 +151,29 @@ bool arp_scan_subnet(const LocalNetInfo& info, std::vector<ArpEntry>& results) {
 
     uint32_t my_ip = string_to_ip(info.ip);
 
-    // 스레드 수 = CPU 코어 수 기반 (최소 4, 최대 32)
-    int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
-    if (hw_threads < 4) hw_threads = 4;
-    if (hw_threads > 32) hw_threads = 32;
+    // ===== 1단계: TCP probe로 ARP 캐시 채우기 =====
+    // RTS_Crosshair 참고: 200ms 타임아웃, 다수 동시 연결
+    // 배치 크기 = 코어 수 * 2 (최소 4, 최대 16)
+    int batch_size = static_cast<int>(std::thread::hardware_concurrency()) * 2;
+    if (batch_size < 4) batch_size = 4;
+    if (batch_size > 16) batch_size = 16;
 
-    // ===== 1단계: ICMP ping으로 살아있는 호스트 빠르게 탐지 =====
-    std::vector<uint32_t> alive_hosts;
-    std::mutex alive_mutex;
+    for (uint32_t batch_start = start; batch_start < end; batch_start += batch_size) {
+        uint32_t batch_end = batch_start + batch_size;
+        if (batch_end > end) batch_end = end;
 
-    {
         std::vector<std::thread> threads;
-        int thread_count = (total < static_cast<uint32_t>(hw_threads)) ? static_cast<int>(total) : hw_threads;
-        uint32_t chunk = total / thread_count;
-        uint32_t remainder = total % thread_count;
-
-        uint32_t current = start;
-        for (int t = 0; t < thread_count; t++) {
-            uint32_t range_end = current + chunk + (t < static_cast<int>(remainder) ? 1 : 0);
-            if (range_end > end) range_end = end;
-
-            threads.emplace_back([&, current, range_end]() {
-                for (uint32_t ip_h = current; ip_h < range_end; ip_h++) {
-                    if (ip_h == my_ip) continue;
-                    if (ping_check(ip_h, 100)) {
-                        std::lock_guard<std::mutex> lock(alive_mutex);
-                        alive_hosts.push_back(ip_h);
-                    }
-                }
-            });
-            current = range_end;
+        for (uint32_t ip_h = batch_start; ip_h < batch_end; ip_h++) {
+            if (ip_h == my_ip) continue;
+            threads.emplace_back(tcp_probe, ip_h);
         }
-
         for (auto& th : threads) {
             th.join();
         }
     }
 
-    if (alive_hosts.empty()) return true;
-
-    // ===== 2단계: 살아있는 호스트에만 SendARP로 MAC 획득 =====
-    std::mutex results_mutex;
-
-    {
-        std::vector<std::thread> threads;
-        for (uint32_t ip_h : alive_hosts) {
-            threads.emplace_back([&, ip_h]() {
-                std::string mac;
-                if (get_mac_by_arp(ip_h, mac)) {
-                    ArpEntry entry;
-                    entry.ip = ip_to_string(ip_h);
-                    entry.mac = mac;
-                    std::lock_guard<std::mutex> lock(results_mutex);
-                    results.push_back(entry);
-                }
-            });
-        }
-
-        for (auto& th : threads) {
-            th.join();
-        }
-    }
+    // ===== 2단계: ARP 캐시 읽기 =====
+    read_arp_cache(info, my_ip, results);
 
     return true;
 }

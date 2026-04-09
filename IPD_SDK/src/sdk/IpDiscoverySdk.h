@@ -45,7 +45,7 @@ typedef enum {
 typedef enum {
     IPD_SEARCH_UPNP    = 0x01,
     IPD_SEARCH_CAMERA  = 0x02,
-    IPD_SEARCH_ALL     = 0x03,
+    IPD_SEARCH_ALL     = 0x02,  // UPnP 제외 (공유기 조회는 별도 사용)
 } ipd_search_flag_t;
 
 // ============================================================
