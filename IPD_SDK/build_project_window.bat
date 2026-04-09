@@ -27,7 +27,7 @@ REM ================
 REM      Configure
 REM ================
 echo [2/3] Configuring with CMake...
-cmake -B build -G "NMake Makefiles"
+cmake -B build -G "Visual Studio 16 2019" -A x64
 if errorlevel 1 (
     echo.
     echo [ERROR] CMake configuration failed!
@@ -47,7 +47,7 @@ REM ================
 REM      Build
 REM ================
 echo [3/3] Building project...
-cmake --build build
+cmake --build build --config Release
 if errorlevel 1 (
     echo.
     echo [ERROR] Build failed!

@@ -107,9 +107,11 @@ bool arp_scan_subnet(const LocalNetInfo& info, std::vector<ArpEntry>& results) {
 
     if (total == 0 || total > 1024) return false;
 
-    // 스레드 수 제한 (최대 64개)
-    const int max_threads = 64;
-    int thread_count = (total < static_cast<uint32_t>(max_threads)) ? static_cast<int>(total) : max_threads;
+    // 스레드 수 = CPU 코어 수 기반 (최소 2, 최대 32)
+    int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
+    if (hw_threads < 2) hw_threads = 2;
+    if (hw_threads > 32) hw_threads = 32;
+    int thread_count = (total < static_cast<uint32_t>(hw_threads)) ? static_cast<int>(total) : hw_threads;
 
     std::mutex results_mutex;
     std::vector<std::thread> threads;

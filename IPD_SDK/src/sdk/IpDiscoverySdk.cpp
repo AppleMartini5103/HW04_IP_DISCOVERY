@@ -124,18 +124,28 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
 
         int port_timeout = (timeout_ms > 0) ? timeout_ms : 500;
 
-        std::vector<std::thread> threads;
-        for (int i = 0; i < count; i++) {
-            threads.emplace_back([&result, i, port, port_timeout]() {
-                if (port_check_tcp(result->devices[i].ip, port, port_timeout)) {
-                    result->devices[i].ports[0] = port;
-                    result->devices[i].port_count = 1;
-                }
-            });
-        }
+        // 스레드 수 = CPU 코어 수 기반 (최소 2, 최대 32)
+        int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
+        if (hw_threads < 2) hw_threads = 2;
+        if (hw_threads > 32) hw_threads = 32;
 
-        for (auto& th : threads) {
-            th.join();
+        // 배치 단위로 병렬 처리
+        for (int batch_start = 0; batch_start < count; batch_start += hw_threads) {
+            int batch_end = batch_start + hw_threads;
+            if (batch_end > count) batch_end = count;
+
+            std::vector<std::thread> threads;
+            for (int i = batch_start; i < batch_end; i++) {
+                threads.emplace_back([&result, i, port, port_timeout]() {
+                    if (port_check_tcp(result->devices[i].ip, port, port_timeout)) {
+                        result->devices[i].ports[0] = port;
+                        result->devices[i].port_count = 1;
+                    }
+                });
+            }
+            for (auto& th : threads) {
+                th.join();
+            }
         }
         current_step++;
     }
