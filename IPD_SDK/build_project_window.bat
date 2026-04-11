@@ -67,8 +67,8 @@ echo ========================================
 echo Build completed successfully!
 echo ========================================
 echo.
-echo Output: build\sdk\bin\IPD_SDK.dll
-echo Import: build\sdk\lib\IPD_SDK.lib
+echo Output: build\sdk\bin\Release\IPD_SDK.dll
+echo Import: build\sdk\lib\Release\IPD_SDK.lib
 echo Header: build\sdk\include\IpDiscoverySdk.h
 echo.
 echo [INFO] This is a shared library (DLL).
