@@ -11,5 +11,13 @@ struct OnvifDevice {
     std::string firmware_version;
 };
 
-bool onvif_discover(int timeout_ms, std::vector<OnvifDevice>& devices);
-bool onvif_get_device_info(const std::string& service_url, OnvifDevice& device);
+class OnvifDiscovery {
+public:
+    bool discover(int timeout_ms, std::vector<OnvifDevice>& devices);
+    bool getDeviceInfo(const std::string& service_url, OnvifDevice& device);
+
+private:
+    static std::string extractXAddrs(const std::string& xml);
+    static std::string extractIpFromUrl(const std::string& url);
+    static std::string httpPost(const std::string& url, const std::string& body, int timeout_ms);
+};
