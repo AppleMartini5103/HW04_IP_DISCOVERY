@@ -280,6 +280,32 @@ int main() {
 
 ---
 
+## 리팩토링 이력
+
+### class화 및 파일 통합
+- ArpScanner + PortScanner → **NetworkScanner** class (TCP probe + 포트 오픈 동시 확인)
+- OnvifDiscovery → class화
+- DeviceClassifier → **IpdContext::classifyDevice()** (IpDiscoverySdk.cpp 흡수)
+- UpnpQuery → **제거** (UPnP 미사용)
+- 1단계/2단계 TCP probe 통합 (port=0이면 80, port>0이면 해당 포트)
+- miniupnpc 의존성 제거 (CMakeLists.txt, DLL 복사 삭제)
+- IpdContext 싱글톤 스레드 안전성 (mutex)
+
+### 최종 소스 파일 구성 (7파일)
+```
+src/
+├── sdk/
+│   ├── IpDiscoverySdk.h     # 공개 API + enum/struct
+│   └── IpDiscoverySdk.cpp   # IpdContext (Singleton) + 공개 API 구현
+├── network/
+│   ├── NetworkScanner.h/cpp # TCP probe + ARP 캐시 + 포트 확인
+│   └── OnvifDiscovery.h/cpp # ONVIF WS-Discovery + GetDeviceInfo
+└── info/
+    └── version.h            # 버전 상수
+```
+
+---
+
 ## 진행 상태 요약
 
 | 마일스톤 | 이슈 | 상태 |
@@ -288,14 +314,13 @@ int main() {
 | | #2 공개 헤더 설계 | ✅ 완료 |
 | | #3 빌드 스크립트 | ✅ 완료 |
 | | #4 버전 API 구현 | ✅ 완료 |
-| 2. 네트워크 탐색 | #5 Network Scan (ICMP + ARP + 포트스캔 2단계) | ✅ 완료 |
-| 3. 프로토콜 상세 | #9 UPnP 조회 | ✅ 완료 |
-| (순서: #9→#10/#11→#8) | #10 ONVIF 검색 | ✅ 완료 |
+| 2. 네트워크 탐색 | #5 Network Scan (TCP probe 통합) | ✅ 완료 |
+| 3. 프로토콜 상세 | #10 ONVIF 검색 | ✅ 완료 |
 | | #11 ONVIF 상세 | ✅ 완료 |
 | | #8 타입 판별 | ✅ 완료 |
 | 4. 통합/최적화 | #12 통합 구현 | ✅ 완료 |
 | | #13 프로그레스 콜백 | ✅ 완료 |
-| | #14 멀티스레드 | ✅ 완료 |
-| 5. 테스트/문서 | #15 예제 프로그램 | ⬜ 미착수 |
-| | #16 빌드 검증 | ⬜ 미착수 |
-| | #17 기술 문서 | ⬜ 미착수 |
+| | #14 멀티스레드 + 최적화 | ✅ 완료 |
+| | 리팩토링 (class화 + 파일 통합) | ✅ 완료 |
+| 5. 테스트/문서 | #15 예제 프로그램 (UNIT_TEST) | ✅ 완료 |
+| | #17 기술 문서 + draw.io | ✅ 완료 |

@@ -14,7 +14,7 @@ struct OnvifDevice {
 class OnvifDiscovery {
 public:
     bool discover(int timeout_ms, std::vector<OnvifDevice>& devices);
-    bool getDeviceInfo(const std::string& service_url, OnvifDevice& device);
+    bool getDeviceInfo(const std::string& service_url, OnvifDevice& device, int timeout_ms);
 
 private:
     static std::string extractXAddrs(const std::string& xml);

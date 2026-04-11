@@ -258,8 +258,9 @@ bool OnvifDiscovery::discover(int timeout_ms, std::vector<OnvifDevice>& devices)
     return true;
 }
 
-bool OnvifDiscovery::getDeviceInfo(const std::string& service_url, OnvifDevice& device) {
-    std::string response = httpPost(service_url, SOAP_GET_DEVICE_INFO, 3000);
+bool OnvifDiscovery::getDeviceInfo(const std::string& service_url, OnvifDevice& device, int timeout_ms) {
+    if (timeout_ms <= 0) timeout_ms = 3000;
+    std::string response = httpPost(service_url, SOAP_GET_DEVICE_INFO, timeout_ms);
     if (response.empty()) return false;
 
     pugi::xml_document doc;

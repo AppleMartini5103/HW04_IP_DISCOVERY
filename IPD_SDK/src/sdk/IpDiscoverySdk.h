@@ -33,44 +33,38 @@ extern "C" {
 // ============================================================
 typedef enum {
     IPD_DEVICE_UNKNOWN  = 0,
-    IPD_DEVICE_IGD      = 1,
-    IPD_DEVICE_CAMERA   = 2,
-    IPD_DEVICE_RADAR    = 3,
-    IPD_DEVICE_HOST     = 4,
+    IPD_DEVICE_CAMERA   = 1,
+    IPD_DEVICE_RADAR    = 2,
+    IPD_DEVICE_HOST     = 3,
 } ipd_device_type_t;
 
 // ============================================================
 // Search flags
 // ============================================================
 typedef enum {
-    IPD_SEARCH_UPNP    = 0x01,
-    IPD_SEARCH_CAMERA  = 0x02,
-    IPD_SEARCH_ALL     = 0x02,  // UPnP 제외 (공유기 조회는 별도 사용)
+    IPD_SEARCH_CAMERA  = 0x01,
+    IPD_SEARCH_ALL     = 0x01,
 } ipd_search_flag_t;
 
 // ============================================================
 // Data structures
 // ============================================================
 
-// Grid 한 줄 = 디바이스 하나
 typedef struct {
     char              ip[64];
     char              mac[24];
     ipd_device_type_t type;
     char              type_name[32];
 
-    // 열린 포트 목록
     uint16_t          ports[32];
     int               port_count;
 
-    // 상세 정보
     char              name[128];
     char              manufacturer[64];
     char              model[64];
     char              detail[256];
 } ipd_device_t;
 
-// 검색 결과
 typedef struct {
     ipd_device_t* devices;
     int           count;
@@ -78,7 +72,6 @@ typedef struct {
     char          subnet[32];
 } ipd_result_t;
 
-// SDK 버전 정보
 typedef struct {
     int         major;
     int         minor;
@@ -98,8 +91,8 @@ typedef void (*ipd_progress_cb)(int current, int total, const char* message);
 
 IPD_API void ipd_get_version(ipd_version_t* version);
 
-// port=0: 네트워크 스캔만 수행 (1단계: ICMP ping + ARP)
-// port>0: 네트워크 스캔 후 발견된 호스트에 TCP 포트 스캔 추가 수행 (2단계)
+// port=0: 네트워크 스캔만 수행 (TCP probe → ARP 캐시 → IP+MAC 수집)
+// port>0: 해당 포트로 TCP probe + 포트 오픈 여부도 기록
 IPD_API int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_result_t* result);
 
 IPD_API void ipd_free_result(ipd_result_t* result);

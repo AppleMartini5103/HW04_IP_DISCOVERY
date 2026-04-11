@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>
 #include <thread>
+#include <mutex>
 #include <algorithm>
 
 #ifdef _WIN32
@@ -30,6 +31,7 @@ public:
     }
 
     bool wsaInit() {
+        std::lock_guard<std::mutex> lock(m_mutex);
 #ifdef _WIN32
         if (m_wsaRefCount++ > 0) return true;
         WSADATA wsa;
@@ -40,6 +42,7 @@ public:
     }
 
     void wsaCleanup() {
+        std::lock_guard<std::mutex> lock(m_mutex);
 #ifdef _WIN32
         if (--m_wsaRefCount <= 0) {
             WSACleanup();
@@ -48,11 +51,19 @@ public:
 #endif
     }
 
-    void setProgressCallback(ipd_progress_cb cb) { m_progressCb = cb; }
+    void setProgressCallback(ipd_progress_cb cb) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_progressCb = cb;
+    }
 
     void reportProgress(int current, int total, const char* message) {
-        if (m_progressCb) {
-            m_progressCb(current, total, message);
+        ipd_progress_cb cb = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            cb = m_progressCb;
+        }
+        if (cb) {
+            cb(current, total, message);
         }
     }
 
@@ -112,6 +123,7 @@ public:
 
 private:
     IpdContext() = default;
+    std::mutex m_mutex;
     ipd_progress_cb m_progressCb = nullptr;
     int m_wsaRefCount = 0;
 };
@@ -154,7 +166,7 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
 
     // 총 단계 수 계산
     int total_steps = 1;  // 네트워크 스캔
-    if ((flags & IPD_SEARCH_UPNP) || (flags & IPD_SEARCH_CAMERA)) total_steps++;
+    if (flags & IPD_SEARCH_CAMERA) total_steps++;
     total_steps++;  // 타입 판별 + 정렬
     int current_step = 0;
 
@@ -224,8 +236,8 @@ int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_res
             std::vector<std::thread> cam_threads;
             for (size_t i = 0; i < onvifDevices.size(); i++) {
                 if (!onvifDevices[i].service_url.empty()) {
-                    cam_threads.emplace_back([&onvif, &onvifDevices, i]() {
-                        onvif.getDeviceInfo(onvifDevices[i].service_url, onvifDevices[i]);
+                    cam_threads.emplace_back([&onvif, &onvifDevices, i, onvif_timeout]() {
+                        onvif.getDeviceInfo(onvifDevices[i].service_url, onvifDevices[i], onvif_timeout);
                     });
                 }
             }

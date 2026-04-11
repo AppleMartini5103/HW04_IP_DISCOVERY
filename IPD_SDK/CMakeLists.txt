@@ -30,14 +30,6 @@ IF(WIN32 AND NOT DEFINED CMAKE_GENERATOR_PLATFORM)
     SET(CMAKE_GENERATOR_PLATFORM x64)
 ENDIF()
 
-# 3rdparty (miniupnp)
-SET(MINIUPNP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/miniupnp)
-SET(MINIUPNP_INCLUDE_DIR ${MINIUPNP_DIR}/include)
-IF(WIN32)
-    SET(MINIUPNP_LIB_DIR ${MINIUPNP_DIR}/lib/window)
-ELSE()
-ENDIF()
-
 # 3rdparty (pugixml)
 SET(PUGIXML_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/pugixml)
 SET(PUGIXML_INCLUDE_DIR ${PUGIXML_DIR})
@@ -72,26 +64,14 @@ TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE
         src
         src/sdk
         src/network
-        ${MINIUPNP_INCLUDE_DIR}
         ${PUGIXML_INCLUDE_DIR}
 )
 
 # LINK
 IF(WIN32)
     TARGET_LINK_LIBRARIES(${PROJECT_NAME} PRIVATE
-        # 3rdparty (miniupnpc)
-        ${MINIUPNP_LIB_DIR}/miniupnpc.lib
-        # windows
         ws2_32.lib
         iphlpapi.lib
-    )
-
-    # POST BUILD - miniupnpc.dll copy
-    ADD_CUSTOM_COMMAND(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${MINIUPNP_LIB_DIR}/miniupnpc.dll"
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>
-        COMMENT "copying miniupnpc.dll to output directory"
     )
 ENDIF()
 

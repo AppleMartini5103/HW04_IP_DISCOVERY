@@ -48,11 +48,4 @@ IF(WIN32)
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMENT "copying IPD_SDK.dll"
     )
-
-    ADD_CUSTOM_COMMAND(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${SDK_BIN_DIR}/miniupnpc.dll"
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>
-        COMMENT "copying miniupnpc.dll"
-    )
 ENDIF()
