@@ -27,6 +27,7 @@ extern "C" {
 #define IPD_ERROR_SOCKET         (-3)
 #define IPD_ERROR_TIMEOUT        (-4)
 #define IPD_ERROR_MEMORY         (-5)
+#define IPD_ERROR_CANCELLED      (-6)
 
 // ============================================================
 // Device type
@@ -63,6 +64,7 @@ typedef struct {
     char              manufacturer[64];
     char              model[64];
     char              detail[256];
+    char              vendor[64];       // MAC 벤더 (OUI 기반)
 } ipd_device_t;
 
 typedef struct {
@@ -83,20 +85,44 @@ typedef struct {
 // ============================================================
 // Callback
 // ============================================================
+
+// 프로그레스 콜백
 typedef void (*ipd_progress_cb)(int current, int total, const char* message);
+
+// 비동기 결과 콜백 — ipd_discover_async()에서 사용
+typedef void (*ipd_result_cb)(int error_code, const ipd_result_t* result);
 
 // ============================================================
 // API
 // ============================================================
 
+// SDK 버전 조회
 IPD_API void ipd_get_version(ipd_version_t* version);
 
-// port=0: 네트워크 스캔만 수행 (TCP probe → ARP 캐시 → IP+MAC 수집)
-// port>0: 해당 포트로 TCP probe + 포트 오픈 여부도 기록
-IPD_API int ipd_discover(ipd_search_flag_t flags, int timeout_ms, uint16_t port, ipd_result_t* result);
+// 동기 스캔 (기존)
+// ports=NULL, port_count=0: 네트워크 스캔만 수행
+// ports 배열 지정: 해당 포트들로 TCP probe + 오픈 여부 기록
+// subnet=NULL: 자동 감지, subnet 지정: 해당 서브넷 스캔 (예: "192.168.0.0/24")
+IPD_API int ipd_discover(ipd_search_flag_t flags, int timeout_ms,
+                         const uint16_t* ports, int port_count,
+                         const char* subnet, ipd_result_t* result);
 
+// 비동기 스캔 — 별도 스레드에서 실행, 완료 시 callback 호출
+IPD_API int ipd_discover_async(ipd_search_flag_t flags, int timeout_ms,
+                               const uint16_t* ports, int port_count,
+                               const char* subnet, ipd_result_cb callback);
+
+// 특정 IP 재스캔
+IPD_API int ipd_rescan_host(const char* ip, const uint16_t* ports, int port_count,
+                            int timeout_ms, ipd_device_t* device);
+
+// 스캔 중지
+IPD_API void ipd_cancel();
+
+// 검색 결과 메모리 해제
 IPD_API void ipd_free_result(ipd_result_t* result);
 
+// 프로그레스 콜백 등록
 IPD_API void ipd_set_progress_callback(ipd_progress_cb callback);
 
 #ifdef __cplusplus

@@ -3,11 +3,13 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <atomic>
+#include <set>
 
 struct ScanEntry {
-    std::string ip;
-    std::string mac;
-    bool        port_open;   // port > 0일 때 해당 포트 오픈 여부
+    std::string          ip;
+    std::string          mac;
+    std::set<uint16_t>   open_ports;
 };
 
 struct LocalNetInfo {
@@ -20,13 +22,22 @@ struct LocalNetInfo {
 
 class NetworkScanner {
 public:
-    // 로컬 네트워크 정보 자동 감지
     bool getLocalNetInfo(LocalNetInfo& info);
 
-    // 서브넷 스캔 (TCP probe → ARP 캐시 읽기 + 포트 오픈 확인 통합)
-    // port=0: 호스트 존재 여부만 (내부적으로 port 80 사용)
-    // port>0: 해당 포트로 probe + 오픈 여부 기록
-    bool scan(const LocalNetInfo& info, uint16_t port, std::vector<ScanEntry>& results);
+    // 서브넷 지정으로 LocalNetInfo 생성
+    bool parseSubnet(const char* subnet, LocalNetInfo& info);
+
+    // 다중 포트 스캔 지원
+    // ports 비어있으면 호스트 존재 확인만 (port 80)
+    bool scan(const LocalNetInfo& info, const std::vector<uint16_t>& ports,
+              std::vector<ScanEntry>& results, std::atomic<bool>& cancelled);
+
+    // 단일 IP 스캔 (재스캔용)
+    bool scanHost(const std::string& ip, const std::vector<uint16_t>& ports,
+                  ScanEntry& result);
+
+    // MAC 벤더 조회 (OUI 기반)
+    static std::string lookupVendor(const std::string& mac);
 
 private:
     static std::string macToString(const uint8_t* mac, int len);
@@ -35,6 +46,6 @@ private:
 
 #ifdef _WIN32
     void readArpCache(const LocalNetInfo& info, uint32_t myIp, std::vector<ScanEntry>& results);
-    void tcpProbe(uint32_t ip_h, uint16_t port, bool recordPort, bool& portOpen);
+    bool tcpProbe(uint32_t ip_h, uint16_t port);
 #endif
 };
